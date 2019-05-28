@@ -38,7 +38,7 @@ def scrape_elections(link, data_directory):
     results = requests.get(race_url, params=payload)
 
     basename = "{}_{}_{}.xls".format(election_year, election_name, race_name)
-    basename = re.sub(r'[\\\/*?:"<>|]', "", basename)  
+    basename = re.sub(r'[\\/*?:"<>|]', "", basename)  
     out_fn = os.path.join(data_directory, "raw", election_year, basename)
   
     write_raw_data(results.content, out_fn)
@@ -97,7 +97,7 @@ def main(directory, primaries, generals, runoffs, years):
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
-  parser.add_argument('-d', '--directory', help="Directory to write data to.")
+  parser.add_argument('-d', '--directory', help="Directory to write data to. Creates it if it does not exist.")
   parser.add_argument('-p', '--primaries', action='store_true', help="Scrape primary election data.")
   parser.add_argument('-g', '--generals', action='store_true', help="Scrape general election data.")
   parser.add_argument('-r', '--runoffs', action='store_true', help="Scrape runoff election data.")
