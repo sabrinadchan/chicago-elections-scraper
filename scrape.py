@@ -8,7 +8,7 @@ import os.path
 import pandas as pd
 import argparse
 
-base_url = "https://chicagoelections.com/en/"
+base_url = "https://chicagoelections.gov/en/"
 
 def check_if_path_exists(path):
   try:
@@ -22,22 +22,32 @@ def write_raw_data(data, out_fn):
   with open(out_fn, 'wb') as f:
     f.write(data)
 
-def scrape_elections(link, data_directory):
+def district_mapper(d):
+  if (d[0].lower() == "w") and (d[1:].isdigit()) and (1 <= int(d[1:]) <= 50):
+    return "Alderman[ -]*{}[A-Za-z ]".format(d[1:])
+
+def scrape_elections(link, districts, data_directory):
   full_url = urljoin(base_url, link['href'])
   r = requests.get(full_url)
   soup = BeautifulSoup(r.text, 'html.parser')
   
   election_id = parse_qs(urlparse(link['href']).query)['election'][0]
   election_year = link.text.split()[0]
-  election_name = ''.join(link.text.split()[1:3]).strip('-')
-  
-  races = [(option['value'], option.text.strip()) for option in soup.find(id='race').find_all("option")]
+  election_name = re.match(r"[0-9]{4} (.*) - [0-9]{1,2}\/", link.text).group(1)
+
+  if not districts:
+    txt_filter = ""
+  else:
+    mapped_districts = [d2 for d2 in (district_mapper(d) for d in districts) if d2 is not None]
+    txt_filter = re.compile("|".join(mapped_districts), re.IGNORECASE)
+
+  races = [(option['value'], option.text.strip()) for option in soup.find(id='race').find_all("option", text=txt_filter)]
   for race_id, race_name in races:
     payload = {'election': election_id, 'race': race_id, 'ward': None, 'precinct': None}
     race_url = urljoin(base_url, "data-export.asp")
     results = requests.get(race_url, params=payload)
 
-    basename = "{}_{}_{}.xls".format(election_year, election_name, race_name)
+    basename = "{} {} {}.xls".format(election_year, election_name, race_name)
     basename = re.sub(r'[\\/*?:"<>|]', "", basename)  
     out_fn = os.path.join(data_directory, "raw", election_year, basename)
   
@@ -66,14 +76,15 @@ def clean_data(fn, data_directory):
     df.Precinct = '{:02}'.format(ward) + df.Precinct.map(lambda x: '{:03}'.format(int(x)))
     processed_dfs.append(df)
   
-  basename = os.path.splitext(os.path.basename(fn))[0] + ".tsv"
-  election_year = basename.split("_")[0]
+  raw_directory, raw_basename = os.path.split(fn)
+  basename = os.path.splitext(raw_basename)[0] + ".tsv"
+  election_year = raw_directory.split(os.path.sep)[-1]
   
   out_fn = os.path.join(data_directory, "clean", election_year, basename)
   check_if_path_exists(os.path.dirname(out_fn))
   pd.concat(processed_dfs, ignore_index=True).to_csv(out_fn, sep='\t', index=False, encoding='utf-8')
 
-def main(directory, primaries, generals, runoffs, years):
+def main(directory, primaries, generals, runoffs, districts, years):
   election_types = []
   if primaries:
     election_types.append("Primary")
@@ -93,17 +104,18 @@ def main(directory, primaries, generals, runoffs, years):
   links = soup.find_all("a", href=re.compile("\?election=[0-9]+"), text=txt_filter)
   
   for link in links:
-    data = scrape_elections(link, directory)
+    data = scrape_elections(link, districts, directory)
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
-  parser.add_argument('-d', '--directory', help="Directory to write data to. Creates it if it does not exist.")
+  parser.add_argument('-f', '--directory', help="Directory to write data to. Creates it if it does not exist.")
   parser.add_argument('-p', '--primaries', action='store_true', help="Scrape primary election data.")
   parser.add_argument('-g', '--generals', action='store_true', help="Scrape general election data.")
   parser.add_argument('-r', '--runoffs', action='store_true', help="Scrape runoff election data.")
+  parser.add_argument('-d', '--districts', nargs='+')
   parser.add_argument('-y', '--years', nargs='+', help="Scrape data for given years. If none given, scrapes data for all available years.")
   args = parser.parse_args()
   if not (args.primaries or args.generals or args.runoffs):
     parser.error('At least one election type --primaries, --generals --runoffs must be given.')
 
-  main(args.directory, args.primaries, args.generals, args.runoffs, args.years) 
+  main(args.directory, args.primaries, args.generals, args.runoffs, args.districts, args.years) 
